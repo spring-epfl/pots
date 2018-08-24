@@ -75,14 +75,14 @@ def train_model(X_train, y_train, X_test, y_test):
     svm_params = clf.best_params_
     return clf, svm_params
 
-def make_transformation_wrapper(df_X):
+def make_transformation_wrapper(features):
 
     class TransformationWrapper:
         """Generate different loan application feature vectors."""
 
-        amount_start_idx = df_X.columns.get_loc("Credit amount_(249.999, 1262.0]")
-        duration_start_idx = df_X.columns.get_loc("Duration_(3.999, 12.0]")
-        purpose_start_idx = df_X.columns.get_loc("Purpose_business")
+        amount_start_idx = features.get_loc("Credit amount_(249.999, 1262.0]")
+        duration_start_idx = features.get_loc("Duration_(3.999, 12.0]")
+        purpose_start_idx = features.get_loc("Purpose_business")
 
         def __init__(self, example, decrease_amount=False, decrease_duration=True):
             self.initial_example = example
@@ -163,11 +163,11 @@ def _hash_fn(example):
     return hash(str(example))
 
 
-def generate_all_transformations(initial_example, df_X, transformation_kwargs=None):
+def generate_all_transformations(initial_example, features, transformation_kwargs=None):
     """Generate all transformations of a given example."""
     if transformation_kwargs is None:
         transformation_kwargs = {}
-    TransformationWrapper = make_transformation_wrapper(df_X)
+    TransformationWrapper = make_transformation_wrapper(features)
 
     result = []
     closed = set()

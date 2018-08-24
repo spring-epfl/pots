@@ -69,17 +69,17 @@ def find_poisoning_group(exp_context, target_group_indices,
     cum_group_scores = []
 
     score_baseline = score_group(exp_context, target_group_indices)
-    allowed_indices = list(range(len(X)))
 
-    # Sort examples by their average similarity to the target group.
+    # Weight examples by their average similarity to the target group.
     sim_fn = lambda i: -np.mean(
             np.linalg.norm(X[i] - X[target_group_indices], ord=1, axis=1))
     sims = np.array(list(map(sim_fn, allowed_indices)))
     weights = softmax(sims)
 
     np.random.seed(seed)
-    sampled_indices = np.random.choice(allowed_indices, size=len(X),
-                                       replace=False, p=weights)
+    sampled_indices = np.random.choice(
+            allowed_indices, size=len(allowed_indices),
+            replace=False, p=weights)
     progbar = tqdm(total=max_group_size)
     group_counter = 0
 
@@ -89,7 +89,7 @@ def find_poisoning_group(exp_context, target_group_indices,
             transformations = _cached_transformations[i]
         else:
             transformations = cred.generate_all_transformations(
-                x, exp_context.df_X,
+                x, exp_context.df_X.columns,
                 transformation_kwargs=dict(
                     decrease_amount=True,
                     decrease_duration=True))
@@ -131,7 +131,7 @@ if __name__ == '__main__':
                         help='Simulations seed')
     parser.add_argument('--num_simulations', default=10, type=int,
                         help='Number of simulations')
-    parser.add_argument('--max_group_size', default=20, type=int,
+    parser.add_argument('--max_group_size', default=5, type=int,
                         help='Max poisoning group size')
 
     args = parser.parse_args()
@@ -142,7 +142,9 @@ if __name__ == '__main__':
     df = exp_context.df
     target_group_sel = (df['Checking account_little'] == 1) \
                      & (df['Saving accounts_little'] == 1) \
-                     & (df['Risk_good'] == 0)
+                     & (df['Risk_good'] == 1) \
+                     & (exp_context.clf.predict(
+                         exp_context.X) == 0).astype(bool)
 
     print('Target group size:', sum(target_group_sel))
     target_group = exp_context.X[target_group_sel]
