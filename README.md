@@ -1,4 +1,4 @@
-# POTs --- accompanying code for the case study
+# Protective optimization techonologies: a credit scoring case study
 
 ## Installation
 
