@@ -1,5 +1,18 @@
 # Protective optimization techonologies: a credit scoring case study
 
+This is the accompanying code to the paper "[POTS: Protective Optimization Technologies](https://arxiv.org/pdf/1806.02711)".
+
+Cite as follows:
+```
+@article{pots,
+  title={POTs: Protective Optimization Technologies},
+  author={Overdorf, Rebekah and Kulynych, Bogdan and Balsa, Ero and Troncoso, Carmela and G{\"u}rses, Seda},
+  journal={arXiv preprint arXiv:1806.02711},
+  year={2018}
+}
+```
+
+
 ## Installation
 
 ### System packages
