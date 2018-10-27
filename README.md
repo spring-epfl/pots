@@ -5,10 +5,18 @@ This is the accompanying code to the papers "[POTS: Protective Optimization Tech
 Cite as follows:
 ```
 @article{pots,
-  title={POTs: Protective Optimization Technologies},
-  author={Overdorf, Rebekah and Kulynych, Bogdan and Balsa, Ero and Troncoso, Carmela and G{\"u}rses, Seda},
-  journal={arXiv preprint arXiv:1806.02711},
-  year={2018}
+  author    = {Rebekah Overdorf and
+               Bogdan Kulynych and
+               Ero Balsa and
+               Carmela Troncoso and
+               Seda G\"urses},
+  title     = {{POTs: Protective Optimization Technologies}},
+  journal   = {CoRR},
+  volume    = {abs/1806.02711},
+  year      = {2018},
+  url       = {http://arxiv.org/abs/1806.02711},
+  archivePrefix = {arXiv},
+  eprint    = {1806.02711},
 }
 ```
 
