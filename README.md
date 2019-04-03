@@ -1,6 +1,6 @@
 # Protective optimization techonologies: a credit scoring case study
 
-This is the accompanying code to the papers "[POTS: Protective Optimization Technologies](https://arxiv.org/abs/1806.02711)" and "Protective Adversarial Machine Learning".
+This is the accompanying code to the papers "[POTS: Protective Optimization Technologies](https://arxiv.org/abs/1806.02711)".
 
 Cite as follows:
 ```
