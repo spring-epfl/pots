@@ -4,7 +4,7 @@ import tqdm
 
 from sklearn.utils import shuffle
 from sklearn.model_selection import train_test_split, GridSearchCV
-from sklearn.linear_model import LogisticRegressionCV
+from sklearn.linear_model import LogisticRegressionCV, LogisticRegression
 from sklearn.svm import SVC
 
 
@@ -55,25 +55,18 @@ def to_numpy_data(df_X, df_y, seed=SEED):
     return X, y, X_train, y_train, X_test, y_test
 
 
-def train_model(X_train, y_train, X_test, y_test):
-    """Train an SVM and find best params."""
-
-    params = {
-        'kernel': ('linear', 'rbf'),
-        'C': [9, 10, 11],
-    }
-
-    svc = SVC(probability=True)
-    clf = GridSearchCV(svc, params, cv=5)
+def train_model(X_train, y_train, X_test, y_test, verbose=True):
+    """Train a model."""
+    clf = LogisticRegression(C=10000000000000, solver="lbfgs")
     clf.fit(X_train, y_train)
 
-    print('Best score is: {:.2f}%. Best params is: {}.'.format(
-            clf.best_score_*100, clf.best_params_))
-    print('Test score is: {:.2f}%.'.format(
-            clf.score(X_test, y_test)*100))
+    if verbose:
+        print('Baseline accuracy is:', y_train.mean())
+        print('Test score is: {:.2f}%.'.format(
+                clf.score(X_test, y_test)*100))
 
-    svm_params = clf.best_params_
-    return clf, svm_params
+    model_params = 0
+    return clf, model_params
 
 def make_transformation_wrapper(features):
 
