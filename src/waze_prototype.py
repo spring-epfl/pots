@@ -1,6 +1,6 @@
+import sys
 import attr
 import osmnx as ox
-import folium
 import networkx as nx
 import matplotlib.colors as colors
 import numpy as np
@@ -27,9 +27,9 @@ def get_speed_delta(target_delta_time, arc_cost):
     return arc_cost.length / (arc_cost.get_time() + target_delta_time) - arc_cost.speed_lim
 
 
-def get_time_delta(arc_cost):
+def get_time_delta(arc_cost, target_speed_lim=MIN_SPEED_LIM):
     """What is the maximum time delta that would make this arc reach the min speed limit"""
-    return arc_cost.length / MIN_SPEED_LIM - arc_cost.get_time()
+    return arc_cost.length / target_speed_lim - arc_cost.get_time()
 
 
 def dot(x, y):
@@ -53,11 +53,14 @@ def set_speed(type):
     else:
         return 25
 
+
+METERS_IN_MILE = 0.0006213712
+
+
 def initialize_data():
     town_name = 'Leonia, NJ'
     source = '22 Fort Lee Rd, Leonia, NJ 07605'
     dest = '95 Hoefleys Ln, Leonia, NJ 07605'
-
 
     # town_name = 'Wind Gap, PA'
     # source = '951 Male Rd, Wind Gap, PA 18091'
@@ -80,7 +83,7 @@ def initialize_data():
     dest = int(nodes.iloc[dest].index.values[0])
     print('origin: %d' % origin)
     print('dest: %d' % dest)
-    nodes_a = nodes.as_matrix(columns=['osmid'])
+    nodes_a = nodes[['osmid']].values
     nodes_fixed = []
     for node in nodes_a:
         if node == dest:
@@ -89,7 +92,7 @@ def initialize_data():
             nodes_fixed.append('S')
         nodes_fixed.append(node[0])
     edges['speed_limit'] = edges['highway'].apply(lambda x: set_speed(x))
-    edges = edges.as_matrix(columns=['u','v','length','speed_limit'])
+    edges = edges[['u','v','length','speed_limit']].values
     # todo add speed limit
     arcs_a = {}
     for edge in edges:
@@ -105,8 +108,9 @@ def initialize_data():
             u = 'T'
         if v == dest:
             v = 'T'
+
         if u in nodes_fixed and v in nodes_fixed:
-            arcs_a[u,v] = ArcCost(speed_lim=speed, length=dist/1.7)
+            arcs_a[u,v] = ArcCost(speed_lim=speed, length=dist * METERS_IN_MILE)
 
     # nodes_fixed = ["S", "A", "B", "C", "T"]
     # arcs_a = {
@@ -120,17 +124,78 @@ def initialize_data():
     #   ("C", "T"): ArcCost(speed_lim=35, length=0.4),
     # }
 
-
     return nodes_fixed, arcs_a
 
 
-def solve(nodes, weighted_arcs):
+def solve_milp(nodes, weighted_arcs, min_time, delta=1):
+    # Initialize solver.
+    solver = pywraplp.Solver('waze',
+                             pywraplp.Solver.CBC_MIXED_INTEGER_PROGRAMMING)
+                             # pywraplp.Solver.GLOP_LINEAR_PROGRAMMING)
+
+    # Constants.
+    interdiction_costs = [1 for _ in weighted_arcs]
+
+    # Initialize interdiction variables.
+    interdiction_vars = []
+    interdiction_vars_by_arc = {}
+    for i, (arc, arc_cost) in enumerate(weighted_arcs.items()):
+        # upper_lim = get_time_delta(arc_cost)
+        # var = solver.NumVar(0.0, upper_lim, "x%i" % i)
+        var = solver.IntVar(0.0, 1.0, "x%i" % i)
+        interdiction_vars.append(var)
+        interdiction_vars_by_arc[arc] = var
+
+    # Initialize shortest-path variables.
+    shortest_path_vars = []
+    path_vars_by_node = {}
+    for i, node in enumerate(nodes):
+        var = solver.NumVar(-solver.infinity(), solver.infinity(), "p%i" % i)
+        shortest_path_vars.append(var)
+        path_vars_by_node[node] = var
+
+    # Specify constraints.
+    solver.Add(path_vars_by_node["T"] - path_vars_by_node["S"] >= min_time)
+
+    arc_time_deltas = {}
+    for arc, arc_cost in weighted_arcs.items():
+        interdiction_var = interdiction_vars_by_arc[arc]
+        p = path_vars_by_node[arc[0]]
+        q = path_vars_by_node[arc[1]]
+
+        updated_speed_lim = arc_cost.speed_lim - delta
+        time_delta = get_time_delta(arc_cost, target_speed_lim=updated_speed_lim)
+        arc_time_deltas[arc] = time_delta
+        if updated_speed_lim >= MIN_SPEED_LIM:
+            solver.Add(q - p - interdiction_var * time_delta <= arc_cost.get_time())
+        else:
+            solver.Add(q - p <= arc_cost.get_time())
+
+    # Specify the objective.
+    solver.Minimize(dot(interdiction_costs, interdiction_vars))
+    result_status = solver.Solve()
+    assert result_status == pywraplp.Solver.OPTIMAL
+
+    print("Target minimal time through town: %2.2f mins" % (min_time * 60))
+    print("Solutions:")
+    for arc, var in interdiction_vars_by_arc.items():
+        time_delta = var.solution_value() * arc_time_deltas[arc]
+        cost = weighted_arcs[arc]
+        if get_speed_delta(time_delta, cost) < -1:
+            print("Road: %s." % repr(arc), "Original speed lim: %2.2f -> New speed lim: %2.2f" % (
+                cost.speed_lim, cost.speed_lim + get_speed_delta(time_delta, cost)))
+
+    print('Problem solved in %f milliseconds' % solver.wall_time())
+    print('Problem solved in %d iterations' % solver.iterations())
+    print('Problem solved in %d branch-and-bound nodes' % solver.nodes())
+
+
+def solve_lp(nodes, weighted_arcs, min_time):
     # Initialize solver.
     solver = pywraplp.Solver('waze',
                              pywraplp.Solver.GLOP_LINEAR_PROGRAMMING)
 
     # Constants.
-    min_time = 30  # greater than 0.6 / 50 + 0.8 / 50 = 0.024
     interdiction_costs = [1 for _ in weighted_arcs]
 
     # Initialize interdiction variables.
@@ -153,24 +218,23 @@ def solve(nodes, weighted_arcs):
     # Specify constraints.
     solver.Add(path_vars_by_node["T"] - path_vars_by_node["S"] >= min_time)
 
-    for arc, cost in weighted_arcs.items():
+    for arc, arc_cost in weighted_arcs.items():
         interdiction_var = interdiction_vars_by_arc[arc]
         p = path_vars_by_node[arc[0]]
         q = path_vars_by_node[arc[1]]
-        solver.Add(q - p - interdiction_var <= cost.get_time())
-        # solver.Add(q - p >= cost.get_time())
+        solver.Add(q - p - interdiction_var <= arc_cost.get_time())
 
     # Specify the objective.
     solver.Minimize(dot(interdiction_costs, interdiction_vars))
     result_status = solver.Solve()
     assert result_status == pywraplp.Solver.OPTIMAL
 
-    print("Solutions.")
-    print("Target minimal time through town: %2.2f mins" % (min_time/60))
+    print("Target minimal time through town: %2.2f mins" % (min_time * 60))
+    print("Solutions:")
     for arc, var in interdiction_vars_by_arc.items():
         time_delta = var.solution_value()
         cost = weighted_arcs[arc]
-        if get_speed_delta(time_delta, cost) < -1:
+        if get_speed_delta(time_delta, cost) < -0.1:
             print("Road: %s." % repr(arc), "Original speed lim: %2.2f -> New speed lim: %2.2f" % (
                 cost.speed_lim, cost.speed_lim + get_speed_delta(time_delta, cost)))
 
@@ -181,5 +245,8 @@ def solve(nodes, weighted_arcs):
 
 if __name__ == '__main__':
     nodes, arcs = initialize_data()
-    solve(nodes, arcs)
 
+    min_time = float(sys.argv[1])
+    # Time through town: 0.0206 hours, or 1.24 mins.
+    solve_milp(nodes, arcs, min_time=min_time, delta=15)
+    # solve_lp(nodes, arcs, min_time=min_time)
