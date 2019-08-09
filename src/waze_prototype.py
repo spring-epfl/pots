@@ -31,6 +31,9 @@ def get_time_delta(arc_cost):
     """What is the maximum time delta that would make this arc reach the min speed limit"""
     return arc_cost.length / MIN_SPEED_LIM - arc_cost.get_time()
 
+def km_to_miles(x):
+    return x * 0.621371
+
 
 def dot(x, y):
     res = x[0] * y[0]
@@ -58,16 +61,9 @@ def initialize_data():
     source = '22 Fort Lee Rd, Leonia, NJ 07605'
     dest = '95 Hoefleys Ln, Leonia, NJ 07605'
 
-
-    # town_name = 'Wind Gap, PA'
-    # source = '951 Male Rd, Wind Gap, PA 18091'
-    # dest = '316 Broadway, Wind Gap, PA 18091'
-
-    # location to save the maps
     ox.config(use_cache=True, log_console=True)
     G = ox.graph_from_place(town_name, network_type='drive')
     nodes, edges = ox.graph_to_gdfs(G)
-
 
     tree = KDTree(nodes[['y', 'x']], metric='euclidean')
 
@@ -78,6 +74,7 @@ def initialize_data():
     dest = ox.geocode(dest)
     dest = tree.query([dest], k=1, return_distance=False)[0]
     dest = int(nodes.iloc[dest].index.values[0])
+
     print('origin: %d' % origin)
     print('dest: %d' % dest)
     nodes_a = nodes.as_matrix(columns=['osmid'])
@@ -88,11 +85,11 @@ def initialize_data():
         if node == origin:
             nodes_fixed.append('S')
         nodes_fixed.append(node[0])
-    edges['speed_limit'] = edges['highway'].apply(lambda x: set_speed(x))
-    edges = edges.as_matrix(columns=['u','v','length','speed_limit'])
-    # todo add speed limit
+
+    edges['max_speed'] = edges['highway'].apply(lambda x: set_speed(x))
+
     arcs_a = {}
-    for edge in edges:
+    for edge in edges.as_matrix(columns=['u','v','length','max_speed']):
         u = int(edge[0])
         v = int(edge[1])
         dist = edge[2]
@@ -106,7 +103,7 @@ def initialize_data():
         if v == dest:
             v = 'T'
         if u in nodes_fixed and v in nodes_fixed:
-            arcs_a[u,v] = ArcCost(speed_lim=speed, length=dist/1.7)
+            arcs_a[u,v] = ArcCost(speed_lim=speed, length=km_to_miles(dist))
 
     # nodes_fixed = ["S", "A", "B", "C", "T"]
     # arcs_a = {
@@ -119,9 +116,46 @@ def initialize_data():
     #   ("B", "C"): ArcCost(speed_lim=35, length=0.5),
     #   ("C", "T"): ArcCost(speed_lim=35, length=0.4),
     # }
-
-
+    G = ox.gdfs_to_graph(nodes, edges)
+    print_graph(G, 'before', origin, dest)
     return nodes_fixed, arcs_a
+
+
+def print_graph(G, name, origin, dest):
+
+
+    colors = ['#E51000', '#E72606', '#E93D0D', '#ED6B1A', '#F3B02E', '#FAF542'];
+
+    for u, v, d in G.edges(data=True):
+        d['weight'] =  d['length'] / d['max_speed']
+        if d['max_speed'] < 25:
+            d['edge_color'] = colors[0]
+        elif d['max_speed'] < 35:
+            d['edge_color'] = colors[1]
+        elif d['max_speed'] < 45:
+            d['edge_color'] = colors[2]
+        elif d['max_speed'] < 55:
+            d['edge_color'] = colors[3]
+        elif d['max_speed'] < 65:
+            d['edge_color'] = colors[4]
+        else:
+            d['edge_color'] = colors[4]
+
+
+    nodes, edges = ox.graph_to_gdfs(G)
+
+    route = nx.shortest_path(G, origin, dest, weight='weight')
+    total_time = 0
+    for node in route:
+        total_time += nodes[node]['length']/nodes[node]['max_speed']
+    print(total_time)
+    quit()
+    fig, ax = ox.plot_graph_route(G, route, route_color='b', fig_height=10, fig_width=10,
+                                  edge_color=edges['edge_color'], node_size=0,
+                                  show=True, close=False, route_linewidth=12)
+
+    fig.savefig('%s.png' % (name), dpi=1000, format='pdf')
+
 
 
 def solve(nodes, weighted_arcs):
@@ -166,7 +200,7 @@ def solve(nodes, weighted_arcs):
     assert result_status == pywraplp.Solver.OPTIMAL
 
     print("Solutions.")
-    print("Target minimal time through town: %2.2f mins" % (min_time/60))
+    print("Target minimal time through town: %2.2f mins" % (min_time))
     for arc, var in interdiction_vars_by_arc.items():
         time_delta = var.solution_value()
         cost = weighted_arcs[arc]
