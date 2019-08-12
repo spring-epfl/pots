@@ -1,3 +1,4 @@
+import attr
 import numpy as np
 import pandas as pd
 import tqdm
@@ -9,6 +10,18 @@ from sklearn.svm import SVC
 
 
 SEED = 1
+
+
+@attr.s
+class Datasets:
+    X = attr.ib()
+    y = attr.ib()
+    X_train = attr.ib()
+    y_train = attr.ib()
+    X_test = attr.ib()
+    y_test = attr.ib()
+    train_ind = attr.ib()
+    test_ind = attr.ib()
 
 
 def load_dataframes(data_path):
@@ -50,9 +63,17 @@ def to_numpy_data(df_X, df_y, seed=SEED):
     print('Shape of X: {}. Shape of y: {}.'.format(X.shape, y.shape))
 
     # Split into training and test sets
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.1, random_state=seed)
-    X_train.shape, y_train.shape, X_test.shape, y_test.shape
-    return X, y, X_train, y_train, X_test, y_test
+    train_ind, test_ind = train_test_split(
+            np.arange(len(X)), test_size=0.2, random_state=seed)
+    return Datasets(
+            X=X, y=y,
+            X_train=X[train_ind],
+            y_train=y[train_ind],
+            X_test=X[test_ind],
+            y_test=y[test_ind],
+            train_ind=train_ind,
+            test_ind=test_ind
+    )
 
 
 def train_model(X_train, y_train, X_test, y_test, verbose=True):
@@ -67,6 +88,7 @@ def train_model(X_train, y_train, X_test, y_test, verbose=True):
 
     model_params = 0
     return clf, model_params
+
 
 def make_transformation_wrapper(features):
 
@@ -179,3 +201,29 @@ def generate_all_transformations(initial_example, features, transformation_kwarg
 
     return result
 
+
+def example_similarity(exp_context, target_group_idxs, static_cols, i):
+    return -np.mean(
+        np.linalg.norm(
+            exp_context.df[static_cols].iloc[i]
+            - exp_context.df[static_cols].iloc[target_group_idxs],
+            ord=2,
+            axis=1,
+        )
+    )
+
+
+def score_group(exp_context, target_group_idxs, trade_off=0.5, custom_clf=None):
+    """Get the average accuracy of the model on the target group."""
+    if custom_clf is None:
+        clf = exp_context.clf
+    else:
+        clf = custom_clf
+
+    group_avg_score = np.mean(clf.predict(exp_context.raw_datasets.X[target_group_idxs]) == 1)
+
+    # We want to also account for externalities on the other individuals.
+    others_idxs = [i for i in exp_context.raw_datasets.train_ind if i not in target_group_idxs]
+    others_avg_score = np.mean(
+            clf.predict(exp_context.raw_datasets.X[others_idxs]) == exp_context.raw_datasets.y[others_idxs])
+    return group_avg_score + trade_off * others_avg_score
