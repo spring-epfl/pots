@@ -75,10 +75,6 @@ def get_leonia_data():
     source = "22 Fort Lee Rd, Leonia, NJ 07605"
     dest = "95 Hoefleys Ln, Leonia, NJ 07605"
 
-    # town_name = 'Wind Gap, PA'
-    # source = '951 Male Rd, Wind Gap, PA 18091'
-    # dest = '316 Broadway, Wind Gap, PA 18091'
-
     # location to save the maps
     ox.config(use_cache=True, log_console=True)
     G = ox.graph_from_place(town_name, network_type="drive")
@@ -125,7 +121,7 @@ def get_leonia_data():
                 speed_lim=speed, length=dist * METERS_IN_MILE
             )
 
-    return processed_nodes, processed_edges
+    return G, (processed_nodes, processed_edges)
 
 
 def solve_milp(
@@ -211,6 +207,7 @@ def solve_milp(
         edge_data = edges[edge]
         if get_speed_delta(edge_data, time_delta) < -TOLERANCE:
             solution.append((edge, edge_data, get_speed_delta(edge_data, time_delta)))
+            # edge_data['delta'] = edge_data.speed_lim + get_speed_delta(edge_data, time_delta)
             if verbose:
                 print(
                     "Road: %s - %2.2f miles." % (repr(edge), edge_data.length),
@@ -228,22 +225,89 @@ def solve_milp(
     # print('Problem solved in %d branch-and-bound nodes' % solver.nodes())
 
 
+def print_graph(G, solution):
+    colors = ['w', 'r', 'o', 'y', 'g', 'b']
+
+    # solution.append((edge, edge_data, get_speed_delta(edge_data, time_delta)))
+
+    for s in solution:
+        for u, v, d in G.edges(data=True):
+            if u in s[0] and v in s[0]:
+                d['delta'] = s[2]
+                print('(%d, %d), %s' %(u, v, str(d)))
+            else:
+                d['delta'] = 0
+
+    for u, v, d in G.edges(data=True):
+        d['delta'] = 0
+        for s in solution:
+            if u in solution[0][0] and v in solution[0][0]:
+                d['delta'] = s[2]
+
+    for u, v, d in G.edges(data=True):
+
+        if -d['delta'] < 5:
+            d['edge_color'] = colors[0]
+        elif 5 < -d['delta'] < 10:
+            d['edge_color'] = colors[1]
+        elif 10 < -d['delta'] < 15:
+            d['edge_color'] = colors[2]
+        elif 15 < -d['delta'] < 20:
+            d['edge_color'] = colors[3]
+        elif 20 < -d['delta'] < 25:
+            d['edge_color'] = colors[4]
+        elif -d['delta'] > 25:
+            d['edge_color'] = colors[5]
+        else:
+            d['edge_color'] = 'b'
+
+
+    nodes, edges = ox.graph_to_gdfs(G)
+
+    source = "22 Fort Lee Rd, Leonia, NJ 07605"
+    dest = "95 Hoefleys Ln, Leonia, NJ 07605"
+
+    origin = ox.geocode(source)
+    tree = KDTree(nodes[['y', 'x']], metric='euclidean')
+    origin = tree.query([origin], k=1, return_distance=False)[0]
+    origin = nodes.iloc[origin].index.values[0]
+
+    dest = ox.geocode(dest)
+    dest = tree.query([dest], k=1, return_distance=False)[0]
+    dest = nodes.iloc[dest].index.values[0]
+
+    route = nx.shortest_path(G, origin, dest, weight='weight')
+    total_time = 0
+    # for node in route:
+    #     total_time += nodes[node]['length']/nodes[node]['max_speed']
+
+    fig, ax = ox.plot_graph_route(G, route, route_color='b', fig_height=10, fig_width=10,
+                                  edge_color=edges['edge_color'], node_size=0,
+                                  show=True, close=False, route_linewidth=12)
+    fig.show()
+    fig.savefig('%s.png' % ('delta'), dpi=1000, format='pdf')
+
+
 def adaptive_delta(edge_data):
     speed_lim = edge_data.speed_lim
-    if speed_lim <= 30:
-        return speed_lim - MIN_SPEED_LIM
-    if 30 < speed_lim <= 45:
-        return speed_lim - 15
-    if 45 < speed_lim <= 55:
+    if speed_lim == 45:
         return speed_lim - 25
-    if 55 < speed_lim <= 80:
-        return speed_lim - 25
+    return speed_lim - (speed_lim-20)
+    # if speed_lim <= 30:
+    #     return speed_lim - MIN_SPEED_LIM
+    # if 30 < speed_lim <= 45:
+    #     return speed_lim - 30
+    # if 45 < speed_lim <= 55:
+    #     return speed_lim - 40
+    # if 55 < speed_lim <= 80:
+    #     return speed_lim - 45
 
 
 if __name__ == "__main__":
-    nodes, arcs = get_leonia_data()
+    G, (nodes, arcs) = get_leonia_data()
 
-    min_time = float(sys.argv[1])
+    # min_time = float(sys.argv[1])
+    min_time = 0.0306
     # Time through town: 0.0206 hours, or 1.24 mins.
     print("Target min time through town: %2.2f mins" % (min_time * 60))
     solution, time = solve_milp(
@@ -257,3 +321,4 @@ if __name__ == "__main__":
     print("Solution size:", len(solution))
     print("Solving time: %2.2f ms" % time)
 
+    print_graph(G, solution)
