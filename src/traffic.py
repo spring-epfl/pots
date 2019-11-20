@@ -1,4 +1,5 @@
 import sys
+from pyroutelib3 import Router
 import attr
 import osmnx as ox
 import networkx as nx
@@ -7,12 +8,17 @@ import numpy as np
 import matplotlib.pyplot as plt
 import os
 from sklearn.neighbors import KDTree
+from datetime import datetime
+import seaborn as sns
+import pandas as pd
+import plot_params
 
 from ortools.linear_solver import pywraplp
 
 # Minimum possible speed limit in mph.
+# Minimum possible speed limit in mph.
 MIN_SPEED_LIM = 15
-
+# sns.set(style="whitegrid")
 
 @attr.s
 class EdgeData:
@@ -20,9 +26,10 @@ class EdgeData:
 
     speed_lim = attr.ib()
     length = attr.ib()
+    in_town = False
 
     def get_time(self):
-        return self.length / self.speed_lim
+        return self.length / self.speed_lim #+ 45/SECONDS_IN_HOUR
 
 
 def get_speed_delta(edge_data, target_time_delta):
@@ -31,12 +38,6 @@ def get_speed_delta(edge_data, target_time_delta):
         edge_data.length / (edge_data.get_time() + target_time_delta)
         - edge_data.speed_lim
     )
-
-
-def get_time_delta(edge_data, target_speed_lim=MIN_SPEED_LIM):
-    """What is the maximum time delta that would make this edge reach the min speed limit"""
-    return edge_data.length / target_speed_lim - edge_data.get_time()
-
 
 def get_time_delta(edge_data, target_speed_lim=MIN_SPEED_LIM):
     speed_delta = edge_data.speed_lim - target_speed_lim
@@ -50,45 +51,61 @@ def dot(x, y):
     return res
 
 
-def set_speed(type):
+def set_speed(type, length):
+
     if type == "residential":
         return 25
+        # t = length / 25 #+ 45/SECONDS_IN_HOUR # this assumes 45 seconds through the intersection on average
+        # return length / t
     elif type == "tertiary":
-        return 45
+        t = length / 35 #+ 45/SECONDS_IN_HOUR  # this assumes 45 seconds through the intersection on average
+        return length / t
     elif type == "secondary":
-        return 45
+        t = length / 25 #+ 45/SECONDS_IN_HOUR  # this assumes 45 seconds through the intersection on average
+        return length / t
     elif type == "primary":
         return 65
     elif type == "motorway_link":
-        return 55
+        return 45
     else:
         return 25
 
 
+SECONDS_IN_HOUR = 3600
 METERS_IN_MILE = 0.0006213712
 TOLERANCE = 0.001
 
 
-def get_leonia_data():
-    """Get data for Leonia, NJ."""
-    town_name = "Leonia, NJ"
-    source = "22 Fort Lee Rd, Leonia, NJ 07605"
-    dest = "95 Hoefleys Ln, Leonia, NJ 07605"
+def get_town_data(town_name, source, dest):
 
-    # location to save the maps
     ox.config(use_cache=True, log_console=True)
-    G = ox.graph_from_place(town_name, network_type="drive")
-    nodes, edges = ox.graph_to_gdfs(G)
+    G_town = ox.graph_from_place(town_name, network_type="drive", simplify=False)
 
-    tree = KDTree(nodes[["y", "x"]], metric="euclidean")
+    G_town = ox.simplify.simplify_graph(G_town, strict=False)
 
-    origin = ox.geocode(source)
-    origin = tree.query([origin], k=1, return_distance=False)[0]
-    origin = int(nodes.iloc[origin].index.values[0])
+    nodes, edges = ox.graph_to_gdfs(G_town)
 
-    dest = ox.geocode(dest)
-    dest = tree.query([dest], k=1, return_distance=False)[0]
-    dest = int(nodes.iloc[dest].index.values[0])
+    town_node_ids = set(nodes)
+    # x, y = town_edges.unary_union.centroid.xy
+    # graph_centroid = (y[0], x[0])
+    # G is the surrounding area and the town.
+    # G_wide = ox.graph_from_point(graph_centroid, distance=10000, network_type='drive')
+    # nodes, edges = ox.graph_to_gdfs(G_wide)
+
+    if type(source) == type(100):
+        dest = dest
+        origin = source
+    else:
+        tree = KDTree(nodes[["y", "x"]], metric="euclidean")
+
+        origin = ox.geocode(source)
+        origin = tree.query([origin], k=1, return_distance=False)[0]
+        origin = int(nodes.iloc[origin].index.values[0])
+
+        dest = ox.geocode(dest)
+        dest = tree.query([dest], k=1, return_distance=False)[0]
+        dest = int(nodes.iloc[dest].index.values[0])
+
     node_ids = nodes[["osmid"]].values
     processed_nodes = []
     for node_id in node_ids:
@@ -97,12 +114,13 @@ def get_leonia_data():
         if node_id == origin:
             processed_nodes.append("S")
         processed_nodes.append(node_id[0])
-    edges["speed_limit"] = edges["highway"].apply(lambda x: set_speed(x))
-    edges = edges[["u", "v", "length", "speed_limit"]].values
+    # change from meters to miles
+    edges['length'] = edges['length'].apply(lambda x: x * METERS_IN_MILE)
+    edges["speed_limit"] = edges.apply(lambda x: set_speed(x.highway, x.length), axis=1)
+    # edges["speed_limit"] = edges["highway"].apply(lambda x: set_speed(x))
 
-    # TODO: Fix the speed limits.
     processed_edges = {}
-    for edge in edges:
+    for edge in edges[["u", "v", "length", "speed_limit"]].values:
         u = int(edge[0])
         v = int(edge[1])
         dist = edge[2]
@@ -117,11 +135,14 @@ def get_leonia_data():
             v = "T"
 
         if u in processed_nodes and v in processed_nodes:
-            processed_edges[u, v] = EdgeData(
-                speed_lim=speed, length=dist * METERS_IN_MILE
+            in_town = True if u in town_node_ids or v in town_node_ids else False
+            e = EdgeData(
+                speed_lim=speed, length=dist
             )
-
-    return G, (processed_nodes, processed_edges)
+            # e.set_in_town(in_town)
+            processed_edges[u, v] = e
+    G = ox.gdfs_to_graph(nodes, edges)
+    return (G, origin, dest), (processed_nodes, processed_edges)
 
 
 def solve_milp(
@@ -196,11 +217,12 @@ def solve_milp(
             solver.Add(q - p <= edge_data.get_time())
 
     # Specify the objective.
+    print('Solving... %s' %(datetime.now()))
     solver.Minimize(dot(interdiction_costs, interdiction_vars))
     result_status = solver.Solve()
     if result_status != pywraplp.Solver.OPTIMAL:
         raise Exception("Solution not found")
-
+    print('Solved %s' % (datetime.now()))
     solution = []
     for edge, var in interdiction_vars_by_arc.items():
         time_delta = var.solution_value() * arc_time_deltas[edge]
@@ -217,82 +239,110 @@ def solve_milp(
                         edge_data.speed_lim + get_speed_delta(edge_data, time_delta),
                     ),
                 )
+    print('solved with solution of len %d and cost %2.2f in %f seconds' %(len(solution), solver.Objective().Value(), solver.wall_time()))
 
-    return solution, solver.wall_time()
+    return solution, solver.wall_time(), solver.Objective().Value()
 
     # print('Problem solved in %f milliseconds' % solver.wall_time())
     # print('Problem solved in %d iterations' % solver.iterations())
     # print('Problem solved in %d branch-and-bound nodes' % solver.nodes())
 
 
-def print_graph(G, solution):
-    colors = ['w', 'r', 'o', 'y', 'g', 'b']
+def print_graph(G_town, origin, dest, solution, title='map'):
 
+    town_nodes, town_edges = ox.graph_to_gdfs(G_town)
+    x, y = town_edges.unary_union.centroid.xy
+    town_centroid = (y[0], x[0])
+
+    G_area = ox.graph_from_point(town_centroid, distance=2500, simplify=False, network_type='drive')
+
+    G_area = ox.simplify.simplify_graph(G_area, strict=False)
+    town_node_ids = set(G_town.nodes())
+
+    # set default vals and make the weight d = rt -> t = d/r
+    for u, v, d in G_area.edges(data=True):
+        d['edge_color'] = '#2b83ba' if u in town_node_ids and v in town_node_ids else 'lightgray'
+        print(d['highway'])
+        if d['highway'] == 'motorway' or d['highway'] == 'trunk' or d['highway'] == 'motorway_link':
+            d['edge_color'] = 'orange'
+        # d['weight'] = (d['length'] * METERS_IN_MILE) / d['speed_limit']
+        d['delta'] = 0
+        # d['edge_color'] = '#2b83ba'
+        d['edge_linewidth'] = 0.5
     # solution.append((edge, edge_data, get_speed_delta(edge_data, time_delta)))
 
     for s in solution:
-        for u, v, d in G.edges(data=True):
-            if u in s[0] and v in s[0]:
+        su = s[0][0]
+        sv = s[0][1]
+        if su == 'T':
+            su = dest
+        if sv == 'T':
+            sv = dest
+        if su == 'S':
+            su = origin
+        if sv == 'S':
+            sv = origin
+
+        # find the edge
+        found = False
+        for u, v, d in G_area.edges(data=True):
+            if u in (su, sv) and v in (su, sv):
                 d['delta'] = s[2]
-                print('(%d, %d), %s' %(u, v, str(d)))
-            else:
-                d['delta'] = 0
+                d['edge_color'] = 'k'
+                d['edge_linewidth'] = 2
+                # d['speed_limit'] = d['speed_limit'] + s[-1]
+                found = True
+                # print('d: (%d, %d), %s' % (u, v, str(d)))
+        if not found:
+            print('CANNOT FIND THIS EDGE IN THE ORIGINAL GRAPH: ' + str(s))
+            quit()
 
-    for u, v, d in G.edges(data=True):
-        d['delta'] = 0
-        for s in solution:
-            if u in solution[0][0] and v in solution[0][0]:
-                d['delta'] = s[2]
+    nodes, edges = ox.graph_to_gdfs(G_area)
 
-    for u, v, d in G.edges(data=True):
+    router = Router("car")
+    # start = router.findNode(lat, lon)
+    # end = router.findNode(lat, lon)
+    start = origin
+    end = dest
 
-        if -d['delta'] < 5:
-            d['edge_color'] = colors[0]
-        elif 5 < -d['delta'] < 10:
-            d['edge_color'] = colors[1]
-        elif 10 < -d['delta'] < 15:
-            d['edge_color'] = colors[2]
-        elif 15 < -d['delta'] < 20:
-            d['edge_color'] = colors[3]
-        elif 20 < -d['delta'] < 25:
-            d['edge_color'] = colors[4]
-        elif -d['delta'] > 25:
-            d['edge_color'] = colors[5]
-        else:
-            d['edge_color'] = 'b'
+    status, route = router.doRoute(start, end)  # Find the route - a list of OSM nodes
+
+    if status == 'success':
+        routeLatLons = list(map(router.nodeLatLon, route))  # Get actual route coordinates
+
+    route = nx.shortest_path(G_area, origin, dest, weight='weight')
 
 
-    nodes, edges = ox.graph_to_gdfs(G)
+    fig, ax = ox.plot_graph_route(G_area, route, orig_dest_node_size=20, route_color='b', fig_height=5, fig_width=10,
+                                  edge_color=edges['edge_color'], edge_alpha=1, node_size=0,
+                                  save=True, close=True, file_format='pdf', filename='maps/%s' % (title),
+                                  show=False, route_linewidth=0, edge_linewidth=edges['edge_linewidth'])
+    # print('changed: ' + str(changed))
 
-    source = "22 Fort Lee Rd, Leonia, NJ 07605"
-    dest = "95 Hoefleys Ln, Leonia, NJ 07605"
+    # fig.savefig('maps/%s.png' % (title), dpi=1000, format='pdf')
 
-    origin = ox.geocode(source)
-    tree = KDTree(nodes[['y', 'x']], metric='euclidean')
-    origin = tree.query([origin], k=1, return_distance=False)[0]
-    origin = nodes.iloc[origin].index.values[0]
 
-    dest = ox.geocode(dest)
-    dest = tree.query([dest], k=1, return_distance=False)[0]
-    dest = nodes.iloc[dest].index.values[0]
-
-    route = nx.shortest_path(G, origin, dest, weight='weight')
-    total_time = 0
-    # for node in route:
-    #     total_time += nodes[node]['length']/nodes[node]['max_speed']
-
-    fig, ax = ox.plot_graph_route(G, route, route_color='b', fig_height=10, fig_width=10,
-                                  edge_color=edges['edge_color'], node_size=0,
-                                  show=True, close=False, route_linewidth=12)
-    fig.show()
-    fig.savefig('%s.png' % ('delta'), dpi=1000, format='pdf')
+def add_intersection_delay(d, r):
+    t = d/r + 45 / SECONDS_IN_HOUR
+    r = d/t
+    return r
 
 
 def adaptive_delta(edge_data):
+    # if not edge_data.in_town:
+    #     return edge_data.speed_lim
+
     speed_lim = edge_data.speed_lim
-    if speed_lim == 45:
-        return speed_lim - 25
-    return speed_lim - (speed_lim-20)
+    # len = edge_data.length
+    # if speed_lim > 30:
+    #     return 25
+    if speed_lim <= 30:
+        return speed_lim - 10
+    return speed_lim - 15
+
+    # if speed_lim == 45:
+    #     return speed_lim - 25
+    # return speed_lim - (speed_lim-5)
     # if speed_lim <= 30:
     #     return speed_lim - MIN_SPEED_LIM
     # if 30 < speed_lim <= 45:
@@ -302,23 +352,171 @@ def adaptive_delta(edge_data):
     # if 55 < speed_lim <= 80:
     #     return speed_lim - 45
 
+def all_pairs_cost(G_changed):
+    indexable_edges = {}
+    for u, v, d in G_changed.edges(data=True):
+        d['weight'] = (d['length'] * METERS_IN_MILE) / d['speed_limit']
+        indexable_edges[(u, v)] = d
+
+    # return nx.average_shortest_path_length(G_changed, weight='weight')
+    routes = dict(nx.all_pairs_shortest_path(G_changed))
+    # this data structure is hell.
+    # So it's (s0, {d0:[r0], d1:[r1], d2:[r2]...}...)
+    total_times = []
+    for start_node, routes_from in routes.items():
+        for end_node, route in routes_from.items():
+            total_time = 0
+            for i in range(0, len(route)-1):
+                total_time += indexable_edges[(route[i], route[i+1])]['weight']
+            total_times.append(total_time*60)
+
+    return sum(total_times)/len(total_times)
+
+
+def update_speedlimits(G_town, origin, dest, solution):
+    for s in solution:
+        su = s[0][0]
+        sv = s[0][1]
+        if su == 'T':
+            su = dest
+        if sv == 'T':
+            sv = dest
+        if su == 'S':
+            su = origin
+        if sv == 'S':
+            sv = origin
+
+        for u, v, d in G_town.edges(data=True):
+            if u in (su, sv) and v in (su, sv):
+                d['speed_limit'] = d['speed_limit'] + s[2]
+
+
+def make_cost_func(town_name, source, dest, cost_type='uniform'):
+
+    times = np.arange(4, 1, -0.4)
+    costs = []
+    for min_time_mins in times:
+        print(min_time_mins)
+        (G, s, t), (nodes, arcs) = get_town_data(town_name, source, dest)
+        min_time = min_time_mins / 60
+        # Time through town: 0.0206 hours, or 1.24 mins.
+        print("Target min time through town: %2.2f mins" % (min_time * 60))
+        try:
+            solution, time, milp_cost = solve_milp(
+                nodes,
+                arcs,
+                min_time=min_time,
+                delta=adaptive_delta,
+                costs='length',
+                verbose=True,
+            )
+
+            update_speedlimits(G, s, t, solution)
+        except Exception as e:
+            print(e)
+            print('No Solution')
+            costs.append(None)
+            continue
+        if len(solution) == 0:
+            costs.append(None)
+            # break
+        else:
+            if cost_type=='in_town':
+                costs.append(all_pairs_cost(G))
+            if cost_type=='uniform':
+                costs.append(len(solution))
+            if cost_type=='length':
+                print('added cost:')
+                costs.append(milp_cost)
+            print_graph(G, s, t, solution, title='%s_%2.2f' %(town_name.replace(' ',''), min_time_mins))
+            print("IT WORKED!")
+            quit()
+    with open('%s/%s_town_effects.csv' % (town_name.replace(' ',''), cost_type), 'w') as o:
+        for t, c in zip(times, costs):
+            if c == None:
+                c = -1
+            o.write('%2.2f,%2.2f\n' %(t,c))
+
+    times_relative = []
+    costs_relative = []
+    first_time = None
+    first_cost = None
+    for t, c in zip(reversed(times), reversed(costs)):
+        if c != None:
+            if first_time == None:
+                first_time = t
+                first_cost = c
+            times_relative.append(100*((t - first_time)/first_time))
+            costs_relative.append(100*((c - first_cost)/first_cost))
+
+    plt.plot(times_relative, costs_relative)
+    if cost_type == 'uniform':
+        plt.title('Cost of Delaying Through Traffic')
+        plt.ylabel('Number of Road Segments Effected')
+    if cost_type == 'in_town':
+        plt.title('Effect of Changes on In-Town Travel')
+        plt.ylabel('Percent Increase of Average In-Town Travel Time')
+
+    plt.xlabel('Percent Increase of Through Traffic Travel')
+    plt.tight_layout()
+    plt.show()
+
 
 if __name__ == "__main__":
-    G, (nodes, arcs) = get_leonia_data()
 
-    # min_time = float(sys.argv[1])
-    min_time = 0.0306
-    # Time through town: 0.0206 hours, or 1.24 mins.
-    print("Target min time through town: %2.2f mins" % (min_time * 60))
-    solution, time = solve_milp(
-        nodes,
-        arcs,
-        min_time=min_time,
-        delta=adaptive_delta,
-        costs="length",
-        verbose=True,
-    )
-    print("Solution size:", len(solution))
-    print("Solving time: %2.2f ms" % time)
+    town_name = "Leonia, NJ"
+    dest = 103185965
+    source = 4207193769
+    make_cost_func(town_name, source, dest, cost_type='in_town')
 
-    print_graph(G, solution)
+    # town_name = 'Lieusaint, France'
+    # source = 1932540940
+    # dest = 1472509406
+    # make_cost_func(town_name, source, dest, cost_type='in_town')
+    #
+    # town_name = 'Fremont, California'
+    # source = 52986461
+    # dest = 53006402
+    # make_cost_func(town_name, source, dest, cost_type='in_town')
+    # make_cost_func()
+    #
+    # times = np.arange(3.75, 0.5, -0.1)
+    # for min_time_mins in times:
+    #     (G, s, t), (nodes, arcs) = get_town_data(town_name, source, dest)
+    #
+    #     min_time = min_time_mins / 60
+    #     # Time through town: 0.0206 hours, or 1.24 mins.
+    #     print("Target min time through town: %2.2f mins" % (min_time * 60))
+    #     try:
+    #         solution, time, costs = solve_milp(
+    #             nodes,
+    #             arcs,
+    #             min_time=min_time,
+    #             delta=adaptive_delta,
+    #             costs='distance',
+    #             verbose=True,
+    #         )
+    #
+    #     except:
+    #         print('No Solution')
+    #         continue
+    #     if len(solution) != 0:
+    #         print_graph(G, s, t, solution)
+
+    # (G, s, t), (nodes, arcs) = get_town_data(town_name, '', '')
+    # min_time = min_time_mins / 60
+    # # Time through town: 0.0206 hours, or 1.24 mins.
+    # print("Target min time through town: %2.2f mins" % (min_time * 60))
+    # try:
+    #     solution, time = solve_milp(
+    #         nodes,
+    #         arcs,
+    #         min_time=min_time,
+    #         delta=adaptive_delta,
+    #         costs='length',
+    #         verbose=True,
+    #     )
+    # except:
+    #     print('No Solution')
+    #
+    # print_graph(G, s, t, solution)
