@@ -169,7 +169,7 @@ def print_graph(G_town, origin, dest, solution, title="map"):
         save=True,
         close=True,
         file_format="pdf",
-        filename="images/maps/%s" % (title),
+        filename="maps/%s" % (title),
         show=False,
         route_linewidth=0,
         edge_linewidth=edges["edge_linewidth"],
@@ -258,7 +258,7 @@ class ExperimentParams:
     "--interdiction_cost", default="length", type=click.Choice(["uniform", "length"])
 )
 @click.option(
-    "--eval_cost", default="in_town", type=click.Choice(["in_town", "length", "length"])
+    "--eval_cost", default="in_town", type=click.Choice(["in_town", "length", "uniform"])
 )
 @click.pass_context
 def cli(ctx, town, delta, interdiction_cost, eval_cost):
