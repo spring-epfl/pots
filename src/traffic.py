@@ -1,24 +1,16 @@
-import sys
 from pyroutelib3 import Router
 import attr
 import osmnx as ox
 import networkx as nx
-import matplotlib.colors as colors
 import numpy as np
 import matplotlib.pyplot as plt
-import os
 from sklearn.neighbors import KDTree
 from datetime import datetime
-import seaborn as sns
-import pandas as pd
-import plot_params
 
 from ortools.linear_solver import pywraplp
 
 # Minimum possible speed limit in mph.
-# Minimum possible speed limit in mph.
 MIN_SPEED_LIM = 15
-# sns.set(style="whitegrid")
 
 @attr.s
 class EdgeData:
@@ -26,10 +18,9 @@ class EdgeData:
 
     speed_lim = attr.ib()
     length = attr.ib()
-    in_town = False
 
     def get_time(self):
-        return self.length / self.speed_lim #+ 45/SECONDS_IN_HOUR
+        return self.length / self.speed_lim + 45/SECONDS_IN_HOUR
 
 
 def get_speed_delta(edge_data, target_time_delta):
@@ -38,6 +29,7 @@ def get_speed_delta(edge_data, target_time_delta):
         edge_data.length / (edge_data.get_time() + target_time_delta)
         - edge_data.speed_lim
     )
+
 
 def get_time_delta(edge_data, target_speed_lim=MIN_SPEED_LIM):
     speed_delta = edge_data.speed_lim - target_speed_lim
@@ -50,25 +42,19 @@ def dot(x, y):
         res += a * b
     return res
 
-
-def set_speed(type, length):
-
+def set_speed(type, d):
     if type == "residential":
-        return 25
-        # t = length / 25 #+ 45/SECONDS_IN_HOUR # this assumes 45 seconds through the intersection on average
-        # return length / t
+        return add_intersection_delay(d, 25)
     elif type == "tertiary":
-        t = length / 35 #+ 45/SECONDS_IN_HOUR  # this assumes 45 seconds through the intersection on average
-        return length / t
+        return add_intersection_delay(d, 45)
     elif type == "secondary":
-        t = length / 25 #+ 45/SECONDS_IN_HOUR  # this assumes 45 seconds through the intersection on average
-        return length / t
+        return add_intersection_delay(d, 45)
     elif type == "primary":
-        return 65
+        return add_intersection_delay(d, 65)
     elif type == "motorway_link":
-        return 45
+        return add_intersection_delay(d, 55)
     else:
-        return 25
+        return add_intersection_delay(d, 25)
 
 
 SECONDS_IN_HOUR = 3600
@@ -86,48 +72,26 @@ def get_town_data(town_name, source, dest):
     nodes, edges = ox.graph_to_gdfs(G_town)
 
     town_node_ids = set(nodes)
-    # x, y = town_edges.unary_union.centroid.xy
-    # graph_centroid = (y[0], x[0])
-    # G is the surrounding area and the town.
-    # G_wide = ox.graph_from_point(graph_centroid, distance=10000, network_type='drive')
-    # nodes, edges = ox.graph_to_gdfs(G_wide)
-
-    if type(source) == type(100):
-        dest = dest
-        origin = source
-    else:
-        tree = KDTree(nodes[["y", "x"]], metric="euclidean")
-
-        origin = ox.geocode(source)
-        origin = tree.query([origin], k=1, return_distance=False)[0]
-        origin = int(nodes.iloc[origin].index.values[0])
-
-        dest = ox.geocode(dest)
-        dest = tree.query([dest], k=1, return_distance=False)[0]
-        dest = int(nodes.iloc[dest].index.values[0])
 
     node_ids = nodes[["osmid"]].values
     processed_nodes = []
     for node_id in node_ids:
         if node_id == dest:
             processed_nodes.append("T")
-        if node_id == origin:
+        if node_id == source:
             processed_nodes.append("S")
         processed_nodes.append(node_id[0])
     # change from meters to miles
     edges['length'] = edges['length'].apply(lambda x: x * METERS_IN_MILE)
     edges["speed_limit"] = edges.apply(lambda x: set_speed(x.highway, x.length), axis=1)
-    # edges["speed_limit"] = edges["highway"].apply(lambda x: set_speed(x))
 
     processed_edges = {}
-    for edge in edges[["u", "v", "length", "speed_limit"]].values:
-        u = int(edge[0])
-        v = int(edge[1])
-        dist = edge[2]
-        speed = edge[3]
-        if u == origin:
+    for u, v, length, speed in edges[["u", "v", "length", "speed_limit"]].values:
+        u = int(u)
+        v = int(v)
+        if u == source:
             u = "S"
-        if v == origin:
+        if v == source:
             v = "S"
         if u == dest:
             u = "T"
@@ -135,14 +99,12 @@ def get_town_data(town_name, source, dest):
             v = "T"
 
         if u in processed_nodes and v in processed_nodes:
-            in_town = True if u in town_node_ids or v in town_node_ids else False
             e = EdgeData(
-                speed_lim=speed, length=dist
+                speed_lim=speed, length=length,
             )
-            # e.set_in_town(in_town)
             processed_edges[u, v] = e
     G = ox.gdfs_to_graph(nodes, edges)
-    return (G, origin, dest), (processed_nodes, processed_edges)
+    return (G, source, dest), (processed_nodes, processed_edges)
 
 
 def solve_milp(
@@ -323,7 +285,7 @@ def print_graph(G_town, origin, dest, solution, title='map'):
 
 
 def add_intersection_delay(d, r):
-    t = d/r + 45 / SECONDS_IN_HOUR
+    t = (d/r) + (45 / SECONDS_IN_HOUR)
     r = d/t
     return r
 
@@ -355,7 +317,7 @@ def adaptive_delta(edge_data):
 def all_pairs_cost(G_changed):
     indexable_edges = {}
     for u, v, d in G_changed.edges(data=True):
-        d['weight'] = (d['length'] * METERS_IN_MILE) / d['speed_limit']
+        d['weight'] = (d['length']) / d['speed_limit']
         indexable_edges[(u, v)] = d
 
     # return nx.average_shortest_path_length(G_changed, weight='weight')
@@ -393,7 +355,7 @@ def update_speedlimits(G_town, origin, dest, solution):
 
 def make_cost_func(town_name, source, dest, cost_type='uniform'):
 
-    times = np.arange(4, 1, -0.4)
+    times = np.arange(4, 1, -0.1)
     costs = []
     for min_time_mins in times:
         print(min_time_mins)
@@ -406,7 +368,8 @@ def make_cost_func(town_name, source, dest, cost_type='uniform'):
                 nodes,
                 arcs,
                 min_time=min_time,
-                delta=adaptive_delta,
+                delta=30,
+                # delta=adaptive_delta,
                 costs='length',
                 verbose=True,
             )
@@ -428,9 +391,9 @@ def make_cost_func(town_name, source, dest, cost_type='uniform'):
             if cost_type=='length':
                 print('added cost:')
                 costs.append(milp_cost)
-            print_graph(G, s, t, solution, title='%s_%2.2f' %(town_name.replace(' ',''), min_time_mins))
-            print("IT WORKED!")
-            quit()
+            # print_graph(G, s, t, solution, title='%s_%2.2f' %(town_name.replace(' ',''), min_time_mins))
+            # print("IT WORKED!")
+            # quit()
     with open('%s/%s_town_effects.csv' % (town_name.replace(' ',''), cost_type), 'w') as o:
         for t, c in zip(times, costs):
             if c == None:
@@ -467,7 +430,7 @@ if __name__ == "__main__":
     town_name = "Leonia, NJ"
     dest = 103185965
     source = 4207193769
-    make_cost_func(town_name, source, dest, cost_type='in_town')
+    make_cost_func(town_name, source, dest)
 
     # town_name = 'Lieusaint, France'
     # source = 1932540940
