@@ -2,6 +2,7 @@
 # Units of distance: miles
 
 from pyroutelib3 import Router
+import click
 import sys
 import attr
 import osmnx as ox
@@ -21,6 +22,10 @@ TOLERANCE = 0.001
 
 def meters_to_miles(meters):
     return meters * 0.0006213712
+
+
+class SolutionNotFound(Exception):
+    pass
 
 
 @attr.s
@@ -69,23 +74,21 @@ def set_speed(type, d):
         return 25
 
 
-def get_town_data(town_name, source, dest):
-
+def get_town_data(town_params):
     ox.config(use_cache=True, log_console=True)
-    G_town = ox.graph_from_place(town_name, network_type="drive", simplify=False)
-
+    G_town = ox.graph_from_place(
+        town_params.town_name, network_type="drive", simplify=False
+    )
     G_town = ox.simplify.simplify_graph(G_town, strict=False)
-
     nodes, edges = ox.graph_to_gdfs(G_town)
-
     town_node_ids = set(nodes)
 
     node_ids = nodes[["osmid"]].values
     processed_nodes = []
     for node_id in node_ids:
-        if node_id == dest:
+        if node_id == town_params.dest:
             processed_nodes.append("T")
-        if node_id == source:
+        if node_id == town_params.source:
             processed_nodes.append("S")
         processed_nodes.append(node_id[0])
     # change from meters to miles
@@ -96,20 +99,20 @@ def get_town_data(town_name, source, dest):
     for u, v, length, speed in edges[["u", "v", "length", "speed_limit"]].values:
         u = int(u)
         v = int(v)
-        if u == source:
+        if u == town_params.source:
             u = "S"
-        if v == source:
+        if v == town_params.source:
             v = "S"
-        if u == dest:
+        if u == town_params.dest:
             u = "T"
-        if v == dest:
+        if v == town_params.dest:
             v = "T"
 
         if u in processed_nodes and v in processed_nodes:
             e = EdgeData(speed_lim=speed, length=length)
             processed_edges[u, v] = e
     G = ox.gdfs_to_graph(nodes, edges)
-    return (G, source, dest), (processed_nodes, processed_edges)
+    return (G, town_params.source, town_params.dest), (processed_nodes, processed_edges)
 
 
 def dot(x, y):
@@ -195,7 +198,8 @@ def solve_milp(
     solver.Minimize(dot(interdiction_costs, interdiction_vars))
     result_status = solver.Solve()
     if result_status != pywraplp.Solver.OPTIMAL:
-        raise Exception("Solution not found")
+        raise SolutionNotFound()
+
     print("Solved %s" % (datetime.now()))
     solution = []
     for edge, var in interdiction_vars_by_arc.items():
@@ -318,6 +322,12 @@ def speed_limit_change_by_15(edge_data):
         return 15
 
 
+def speed_limit_change_to_15(edge_data):
+    speed_lim = edge_data.speed_lim
+    if speed_lim > 15:
+        return speed_lim - 15
+
+
 def time_coef(edge_data, coef=0.3333):
     return get_speed_delta(edge_data, coef * edge_data.get_time())
 
@@ -343,6 +353,24 @@ def all_pairs_cost(G_changed):
     return sum(total_times) / len(total_times)
 
 
+@attr.s
+class TownParams:
+    town_name = attr.ib()
+    dest = attr.ib()
+    source = attr.ib()
+
+
+town_params_map = {
+    "leonia": TownParams(town_name="Leonia, NJ", dest=103185965, source=4207193769),
+    "lieusaint": TownParams(
+        town_name="Lieusaint, France", source=1932540940, dest=1472509406
+    ),
+    "fremont": TownParams(
+        town_name="Fremont, California", source=52986461, dest=53006402
+    ),
+}
+
+
 def update_speedlimits(G_town, origin, dest, solution):
     for s in solution:
         su = s[0][0]
@@ -361,48 +389,89 @@ def update_speedlimits(G_town, origin, dest, solution):
                 d["speed_limit"] = d["speed_limit"] + s[2]
 
 
-def make_cost_func(town_name, source, dest, cost_type="uniform"):
-    times = np.arange(4, 1, -0.1)
+@attr.s
+class ExperimentParams:
+    town_code = attr.ib()
+    town_params = attr.ib()
+    delta = attr.ib()
+    interdiction_cost = attr.ib()
+    eval_cost = attr.ib()
+
+
+@click.group()
+@click.option(
+    "--town", default="leonia", type=click.Choice(["leonia", "lieusaint", "fremont"])
+)
+@click.option(
+    "--delta",
+    default="speed_limit_change_to_15",
+    type=click.Choice(["speed_limit_change_to_15"]),
+)
+@click.option(
+    "--interdiction_cost", default="length", type=click.Choice(["uniform", "length"])
+)
+@click.option(
+    "--eval_cost", default="in_town", type=click.Choice(["in_town", "length", "length"])
+)
+@click.pass_context
+def cli(ctx, town, delta, interdiction_cost, eval_cost):
+    if isinstance(delta, str):
+        delta = eval(delta)
+
+    ctx.obj = ExperimentParams(
+        town_code=town,
+        town_params=town_params_map[town],
+        delta=delta,
+        interdiction_cost=interdiction_cost,
+        eval_cost=eval_cost,
+    )
+
+    print(ctx.obj)
+
+
+@cli.command()
+@click.option("--max_time", default=7, type=float)
+@click.option("--min_time", default=3, type=float)
+@click.option("--time_step", default=-0.1, type=float)
+@click.pass_obj
+def run_experiments(experiment_params, max_time, min_time, time_step):
+    times = np.arange(max_time, min_time, time_step)
     costs = []
     for min_time_mins in times:
         print(min_time_mins)
-        (G, s, t), (nodes, arcs) = get_town_data(town_name, source, dest)
+        (G, s, t), (nodes, arcs) = get_town_data(experiment_params.town_params)
         min_time = min_time_mins / 60
-        # Time through town: 0.0206 hours, or 1.24 mins.
         print("Target min time through town: %2.2f mins" % (min_time * 60))
         try:
             solution, time, milp_cost = solve_milp(
                 nodes,
                 arcs,
                 min_time=min_time,
-                delta=time_coef,
-                costs="length",
+                delta=experiment_params.delta,
+                costs=experiment_params.interdiction_cost,
                 verbose=True,
             )
 
             update_speedlimits(G, s, t, solution)
-        except Exception as e:
-            print(e)
+
+        except SolutionNotFound:
             print("No Solution")
             costs.append(None)
             continue
+
         if len(solution) == 0:
             costs.append(None)
             # break
         else:
-            if cost_type == "in_town":
+            if experiment_params.eval_cost == "in_town":
                 costs.append(all_pairs_cost(G))
-            if cost_type == "uniform":
+            if experiment_params.eval_cost == "uniform":
                 costs.append(len(solution))
-            if cost_type == "length":
-                print("added cost:")
+            if experiment_params.eval_cost == "length":
+                # TODO: Is this right?
                 costs.append(milp_cost)
-            # print_graph(G, s, t, solution, title='%s_%2.2f' %(town_name.replace(' ',''), min_time_mins))
-            # print("IT WORKED!")
-            # quit()
-    with open(
-        "%s/%s_town_effects.csv" % (town_name.replace(" ", ""), cost_type), "w"
-    ) as o:
+
+    with open("%s/%s_town_effects.csv" % (town, eval_cost), "w") as o:
         for t, c in zip(times, costs):
             if c == None:
                 c = -1
@@ -421,10 +490,12 @@ def make_cost_func(town_name, source, dest, cost_type="uniform"):
             costs_relative.append(100 * ((c - first_cost) / first_cost))
 
     plt.plot(times_relative, costs_relative)
-    if cost_type == "uniform":
+
+    if experiment_params.eval_cost == "uniform":
         plt.title("Cost of Delaying Through Traffic")
-        plt.ylabel("Number of Road Segments Effected")
-    if cost_type == "in_town":
+        plt.ylabel("Number of Road Segments Affected")
+
+    if experiment_params.eval_cost == "in_town":
         plt.title("Effect of Changes on In-Town Travel")
         plt.ylabel("Percent Increase of Average In-Town Travel Time")
 
@@ -433,52 +504,24 @@ def make_cost_func(town_name, source, dest, cost_type="uniform"):
     plt.show()
 
 
-if __name__ == "__main__":
-    town_name = "Leonia, NJ"
-    dest = 103185965
-    source = 4207193769
-    # make_cost_func(town_name, source, dest)
-
-    # town_name = 'Lieusaint, France'
-    # source = 1932540940
-    # dest = 1472509406
-    # make_cost_func(town_name, source, dest, cost_type='in_town')
-    #
-    # town_name = 'Fremont, California'
-    # source = 52986461
-    # dest = 53006402
-    # make_cost_func(town_name, source, dest, cost_type='in_town')
-    # make_cost_func()
-    #
-    # times = np.arange(3.75, 0.5, -0.1)
-    # for min_time_mins in times:
-    #     (G, s, t), (nodes, arcs) = get_town_data(town_name, source, dest)
-    #
-    #     min_time = min_time_mins / 60
-    #     # Time through town: 0.0206 hours, or 1.24 mins.
-    #     print("Target min time through town: %2.2f mins" % (min_time * 60))
-    #     try:
-    #         solution, time, costs = solve_milp(
-    #             nodes,
-    #             arcs,
-    #             min_time=min_time,
-    #             delta=adaptive_delta,
-    #             costs='distance',
-    #             verbose=True,
-    #         )
-    #
-    #     except:
-    #         print('No Solution')
-    #         continue
-    #     if len(solution) != 0:
-    #         print_graph(G, s, t, solution)
-
-    (G, s, t), (nodes, arcs) = get_town_data(town_name, source, dest)
-    min_time = float(sys.argv[1]) / 60
+@cli.command()
+@click.option("--min_time", type=float)
+@click.pass_obj
+def run_one_experiment(experiment_params, min_time):
+    (G, s, t), (nodes, arcs) = get_town_data(experiment_params.town_params)
 
     print("Target min time through town: %2.2f mins" % (min_time * 60))
     solution, time, value = solve_milp(
-        nodes, arcs, min_time=min_time, delta=time_coef, costs="length", verbose=True
+        nodes,
+        arcs,
+        min_time=min_time / 60,
+        delta=experiment_params.delta,
+        costs=experiment_params.interdiction_cost,
+        verbose=True,
     )
 
     print_graph(G, s, t, solution)
+
+
+if __name__ == "__main__":
+    cli()
