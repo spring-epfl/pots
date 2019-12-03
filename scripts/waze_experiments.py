@@ -192,7 +192,7 @@ def speed_limit_change_to_15(edge_data):
         return speed_lim - 15
 
 
-def time_slowdown(edge_data, coef=0.3333):
+def time_coef(edge_data, coef=0.3333):
     return get_speed_delta(edge_data, coef * edge_data.get_time())
 
 
@@ -252,7 +252,7 @@ class ExperimentParams:
 @click.option(
     "--delta",
     default="speed_limit_change_to_15",
-    type=click.Choice(["speed_limit_change_to_15", "time_slowdown"]),
+    type=click.Choice(["speed_limit_change_to_15"]),
 )
 @click.option(
     "--interdiction_cost", default="length", type=click.Choice(["uniform", "length"])
@@ -260,12 +260,9 @@ class ExperimentParams:
 @click.option(
     "--eval_cost", default="in_town", type=click.Choice(["in_town", "length", "uniform"])
 )
-@click.option("--slowdown_coef", default=0.3333, type=float)
 @click.pass_context
-def cli(ctx, town, delta, interdiction_cost, eval_cost, slowdown_coef):
-    if delta == "time_slowdown":
-        delta = lambda x: time_slowdown(x, slowdown_coef)
-    elif isinstance(delta, str):
+def cli(ctx, town, delta, interdiction_cost, eval_cost):
+    if isinstance(delta, str):
         delta = eval(delta)
 
     ctx.obj = ExperimentParams(
