@@ -2,6 +2,15 @@
 
 This is the accompanying code to the paper "[POTS: Protective Optimization Technologies](https://arxiv.org/abs/1806.02711)".
 
+It has code for the two case studies in the latest version of the paper:
+
+* Poisoning a credit-scoring model.
+* Replanning a town to avoid Waze routing through it.
+
+One POT in this codebase that did not make into the paper:
+
+* Evasion/"gaming" of the credit-scoring model.
+
 ## Installation
 
 ### System packages
@@ -18,9 +27,10 @@ pip install -r requirements.txt
 
 ## Structure
 
-* `src` --- common utilities for credit scoring.
-* `scripts` --- a script for running the _poisoning_ experiments
-* `notebooks` --- Jupyter notebooks for both evasion and poisoning
+* `scripts` --- a script for running the _poisoning_ credit-scoring experiments, and the traffic
+    routing POT.
+* `notebooks` --- Jupyter notebooks for evasion and poisoning credit scoring experiments
+* `src` --- common utilities and tools.
 * `images` --- after running, the notebooks and scripts save plots here
 * `out` --- the scripts saves simulation data here
 * `data` --- German credit risk dataset
