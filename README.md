@@ -2,23 +2,6 @@
 
 This is the accompanying code to the paper "[POTS: Protective Optimization Technologies](https://arxiv.org/abs/1806.02711)".
 
-Cite as follows:
-```
-@inproceedings{KulynychOTG20,
-  author    = {Bogdan Kulynych and
-               Rebekah Overdorf and
-               Carmela Troncoso and
-               Seda F. G{\"{u}}rses},
-  title     = {POTs: Protective Optimization Technologies},
-  booktitle = {FAT* '20: Conference on Fairness, Accountability, and Transparency,
-               Barcelona, Spain, January 27-30, 2020},
-  pages     = {177--188},
-  year      = {2020},
-  url       = {https://doi.org/10.1145/3351095.3372853},
-  doi       = {10.1145/3351095.3372853},
-}
-```
-
 ## Installation
 
 ### System packages
@@ -68,3 +51,21 @@ PYTHONPATH=. python scripts/anti_waze.py --town leonia run-one-experiment --targ
 jupyter notebook
 ```
 And choose the notebooks in the `notebook` folder
+
+## Citing
+
+```
+@inproceedings{KulynychOTG20,
+  author    = {Bogdan Kulynych and
+               Rebekah Overdorf and
+               Carmela Troncoso and
+               Seda F. G{\"{u}}rses},
+  title     = {POTs: Protective Optimization Technologies},
+  booktitle = {FAT* '20: Conference on Fairness, Accountability, and Transparency,
+               Barcelona, Spain, January 27-30, 2020},
+  pages     = {177--188},
+  year      = {2020},
+  url       = {https://doi.org/10.1145/3351095.3372853},
+  doi       = {10.1145/3351095.3372853},
+}
+```
