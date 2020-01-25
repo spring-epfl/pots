@@ -4,21 +4,20 @@ This is the accompanying code to the paper "[POTS: Protective Optimization Techn
 
 Cite as follows:
 ```
-@article{pots,
+@inproceedings{KulynychOTG20,
   author    = {Bogdan Kulynych and
                Rebekah Overdorf and
                Carmela Troncoso and
-               Seda G\"urses},
-  title     = {{POTs: Protective Optimization Technologies}},
-  journal   = {CoRR},
-  volume    = {abs/1806.02711},
-  year      = {2018},
-  url       = {http://arxiv.org/abs/1806.02711},
-  archivePrefix = {arXiv},
-  eprint    = {1806.02711},
+               Seda F. G{\"{u}}rses},
+  title     = {POTs: Protective Optimization Technologies},
+  booktitle = {FAT* '20: Conference on Fairness, Accountability, and Transparency,
+               Barcelona, Spain, January 27-30, 2020},
+  pages     = {177--188},
+  year      = {2020},
+  url       = {https://doi.org/10.1145/3351095.3372853},
+  doi       = {10.1145/3351095.3372853},
 }
 ```
-
 
 ## Installation
 
