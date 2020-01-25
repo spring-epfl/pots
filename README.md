@@ -1,6 +1,6 @@
-# Protective optimization techonologies: a credit scoring case study
+# Protective optimization techonologies: case studies
 
-This is the accompanying code to the papers "[POTS: Protective Optimization Technologies](https://arxiv.org/abs/1806.02711)".
+This is the accompanying code to the paper "[POTS: Protective Optimization Technologies](https://arxiv.org/abs/1806.02711)".
 
 Cite as follows:
 ```
