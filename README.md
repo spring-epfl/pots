@@ -5,9 +5,8 @@ This is the accompanying code to the papers "[POTS: Protective Optimization Tech
 Cite as follows:
 ```
 @article{pots,
-  author    = {Rebekah Overdorf and
-               Bogdan Kulynych and
-               Ero Balsa and
+  author    = {Bogdan Kulynych and
+               Rebekah Overdorf and
                Carmela Troncoso and
                Seda G\"urses},
   title     = {{POTs: Protective Optimization Technologies}},
@@ -30,7 +29,7 @@ apt install python3 python3-matplotlib python3-numpy python3-scipy python3-sklea
 ```
 
 ### Python
-You need to have Python 3.5 or later. To install the packages, run:
+You need to have Python 3.6 or later. To install the packages, run:
 ```
 pip install -r requirements.txt
 ```
@@ -40,7 +39,7 @@ pip install -r requirements.txt
 * `src` --- common utilities for credit scoring.
 * `scripts` --- a script for running the _poisoning_ experiments
 * `notebooks` --- Jupyter notebooks for both evasion and poisoning
-* `images` --- upon running, the notebooks save plots here
+* `images` --- after running, the notebooks and scripts save plots here
 * `out` --- the scripts saves simulation data here
 * `data` --- German credit risk dataset
 
@@ -51,6 +50,18 @@ PYTHONPATH=. python scripts/credit_poisoning.py
 ```
 
 The experiments for evasion run fast, hence they are directly in the corresponding notebook.
+
+## Running the traffic routing experiments
+
+Check the instructions here:
+```
+PYTHONPATH=. python scripts/anti_waze.py --help
+```
+
+Example run:
+```
+PYTHONPATH=. python scripts/anti_waze.py --town leonia run-one-experiment --target_time 5
+```
 
 ## Running notebooks
 
