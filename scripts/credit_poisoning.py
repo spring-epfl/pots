@@ -187,7 +187,7 @@ def find_poisoning_group(
     max_group_size=10,
     load_candidates_from_cache=True,
 ):
-    """Find a poisoning group."""
+    """Find a poisoning group G_pot."""
 
     if score_goal is None:
         score_goal = np.inf
@@ -295,7 +295,7 @@ def find_poisoning_group(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Run a poisoning attack on loan approval."
+        description="Run a poisoning attack on credit scoring."
     )
     parser.add_argument("--seed", default=1, type=int, help="Random seed")
     parser.add_argument(
@@ -351,4 +351,3 @@ if __name__ == "__main__":
         out_path = "out/group_poisoning_influence_seed_%d_noise_%d_sim_%d" % (args.seed, args.noise_set_size, i)
         with open(out_path, "wb") as f:
             pickle.dump(group_datasets, f)
-
