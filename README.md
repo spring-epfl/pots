@@ -2,12 +2,12 @@
 
 This is the accompanying code to the paper "[POTS: Protective Optimization Technologies](https://arxiv.org/abs/1806.02711)".
 
-It has code for the two case studies in the latest version of the paper:
+It contains code for the two case studies in the latest version of the paper:
 
 * Poisoning a credit-scoring model.
-* Replanning a town to avoid Waze routing through it.
+* Changine speed limits in a town to avoid Waze routing through it.
 
-One POT in this codebase that did not make into the paper:
+One POT in this repo that did not make into the paper:
 
 * Evasion/"gaming" of the credit-scoring model.
 
